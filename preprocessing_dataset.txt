@@ -1,0 +1,320 @@
+"""
+===========================================================
+prepare_dataset.py
+
+Purpose:
+Convert Ninapro DB5 MAT files into a training CSV
+for the rehabilitation prediction model.
+
+Author: Shlok Sharma
+===========================================================
+"""
+
+import os
+import numpy as np
+import pandas as pd
+
+from scipy.io import loadmat
+
+
+# ==========================================================
+# CONFIGURATION
+# ==========================================================
+
+DATASET_FOLDER = "Ninapro_DB5"
+
+OUTPUT_CSV = "processed_dataset.csv"
+
+WINDOW_SIZE = 200
+
+STEP_SIZE = 100
+
+
+# ==========================================================
+# FEATURE FUNCTIONS
+# ==========================================================
+
+def calculate_mav(window):
+
+    return np.mean(np.abs(window))
+
+
+def calculate_rms(window):
+
+    return np.sqrt(np.mean(window ** 2))
+
+
+def calculate_rms_mean(rms_values):
+
+    return np.mean(rms_values)
+
+
+def calculate_rms_std(rms_values):
+
+    return np.std(rms_values)
+
+
+def calculate_mfi(rms_values):
+
+    rms_mean = np.mean(rms_values)
+
+    rms_std = np.std(rms_values)
+
+    return rms_std / (rms_mean + 1e-6)
+
+
+def calculate_mqs(rms_values):
+
+    rms_std = np.std(rms_values)
+
+    score = 100 - (rms_std * 100)
+
+    return np.clip(score, 0, 100)
+
+
+# ==========================================================
+# PROGRESS SCORE
+# ==========================================================
+
+def calculate_progress_score(mfi, mqs):
+
+    score = (
+        (0.7 * mqs)
+        +
+        (0.3 * (100 - (mfi * 100)))
+    )
+
+    return np.clip(score, 0, 100)
+
+
+# ==========================================================
+# EXTRACT FEATURES
+# ==========================================================
+
+def extract_features(window):
+
+    mav_channels = []
+
+    rms_channels = []
+
+    for channel in range(window.shape[1]):
+
+        signal = window[:, channel]
+
+        mav_channels.append(
+
+            calculate_mav(signal)
+
+        )
+
+        rms_channels.append(
+
+            calculate_rms(signal)
+
+        )
+
+    mav = np.mean(mav_channels)
+
+    rms_mean = calculate_rms_mean(
+
+        rms_channels
+
+    )
+
+    rms_std = calculate_rms_std(
+
+        rms_channels
+
+    )
+
+    mfi = calculate_mfi(
+
+        rms_channels
+
+    )
+
+    mqs = calculate_mqs(
+
+        rms_channels
+
+    )
+
+    progress = calculate_progress_score(
+
+        mfi,
+
+        mqs
+
+    )
+
+    return [
+
+        mav,
+
+        rms_mean,
+
+        rms_std,
+
+        mfi,
+
+        mqs,
+
+        progress
+
+    ]
+
+
+# ==========================================================
+# PROCESS ONE MAT FILE
+# ==========================================================
+
+def process_mat_file(file_path):
+
+    print(f"Processing {file_path}")
+
+    data = loadmat(file_path)
+
+    emg = data["emg"]
+
+    samples = []
+
+    for start in range(
+
+        0,
+
+        len(emg) - WINDOW_SIZE,
+
+        STEP_SIZE
+
+    ):
+
+        end = start + WINDOW_SIZE
+
+        window = emg[start:end]
+
+        features = extract_features(window)
+
+        samples.append(features)
+
+    return samples
+
+# ==========================================================
+# PROCESS ENTIRE DATASET
+# ==========================================================
+
+def process_dataset():
+
+    dataset = []
+
+    for root, dirs, files in os.walk(DATASET_FOLDER):
+
+        for file in files:
+
+            if file.endswith(".mat"):
+
+                file_path = os.path.join(root, file)
+
+                try:
+
+                    samples = process_mat_file(file_path)
+
+                    dataset.extend(samples)
+
+                except Exception as e:
+
+                    print(f"Skipping {file} : {e}")
+
+    return dataset
+
+
+# ==========================================================
+# SAVE CSV
+# ==========================================================
+
+def save_csv(dataset):
+
+    columns = [
+
+        "MAV",
+
+        "RMS Mean",
+
+        "RMS Std",
+
+        "MFI",
+
+        "MQS",
+
+        "Progress Score"
+
+    ]
+
+    df = pd.DataFrame(
+
+        dataset,
+
+        columns=columns
+
+    )
+
+    df.to_csv(
+
+        OUTPUT_CSV,
+
+        index=False
+
+    )
+
+    print()
+
+    print("=" * 60)
+
+    print("CSV GENERATED SUCCESSFULLY")
+
+    print("=" * 60)
+
+    print()
+
+    print(f"Samples Generated : {len(df)}")
+
+    print(f"CSV Saved As      : {OUTPUT_CSV}")
+
+    print()
+
+    print(df.head())
+
+
+# ==========================================================
+# MAIN
+# ==========================================================
+
+def main():
+
+    print("=" * 60)
+
+    print("Preparing Ninapro DB5 Dataset")
+
+    print("=" * 60)
+
+    print()
+
+    dataset = process_dataset()
+
+    save_csv(dataset)
+
+    print()
+
+    print("=" * 60)
+
+    print("Dataset Preparation Completed!")
+
+    print("=" * 60)
+
+
+# ==========================================================
+# ENTRY POINT
+# ==========================================================
+
+if __name__ == "__main__":
+
+    main()
